@@ -64,7 +64,8 @@ class MyCartpoleSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
         ),
-        offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
+        # Place the camera in front of the horizontal rail and aim it at the rail centre.
+        offset=CameraCfg.OffsetCfg(pos=(0.0, -2.0, 2.0), rot=(0.707107, -0.707107, 0.0, 0.0), convention="ros"),
     )
 
 ##

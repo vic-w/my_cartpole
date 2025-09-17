@@ -59,7 +59,33 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
             ```bash
             # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
             python scripts/random_agent.py --task=<TASK_NAME>
-            ```
+        ```
+
+## 训练流程（中文说明）
+
+下面示例演示如何在命令行中启动基于 `skrl` 的 Cartpole 强化学习训练。请确保已经完成上面的安装步骤，并在终端中激活了包含 Isaac Lab 的 Python 环境。
+
+1. 切换到仓库根目录（本文件所在路径）：
+
+    ```bash
+    cd /path/to/my_cartpole
+    ```
+
+2. 启动训练脚本，并指定要运行的任务名称。项目默认提供 `MyCartpole-v0` 任务，可直接运行：
+
+    ```bash
+    python scripts/skrl/train.py --task=MyCartpole-v0
+    ```
+
+    - 如果需要保存训练过程中相机拍摄的图像，可额外添加：
+
+        ```bash
+        python scripts/skrl/train.py --task=MyCartpole-v0 --camera-snapshot-interval=500 --camera-output-dir=output/camera
+        ```
+
+      其中 `--camera-snapshot-interval` 控制保存频率（单位：环境步数），`--camera-output-dir` 指定图像输出目录。
+
+3. 训练日志、检查点和相机图像（若启用）都会写入 `logs/` 及 `output/` 等子目录，可根据需要进一步分析或可视化。
 
 ### Set up IDE (Optional)
 
@@ -132,4 +158,6 @@ Some examples of packages that can likely be excluded are:
 "<path-to-isaac-sim>/extscache/omni.graph.*"        // Graph UI tools
 "<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
 ...
-```"# my_cartpole" 
+```
+
+# my_cartpole

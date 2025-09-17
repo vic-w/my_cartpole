@@ -13,7 +13,10 @@ a more user-friendly way.
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import os
 import sys
+import warnings
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -22,6 +25,27 @@ parser = argparse.ArgumentParser(description="Train an RL agent with skrl.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
+parser.add_argument(
+    "--camera_snapshot_interval",
+    type=int,
+    default=0,
+    help=(
+        "Save a still image from the task camera every N environment steps during training. "
+        "Disabled when set to 0."
+    ),
+)
+parser.add_argument(
+    "--camera_snapshot_env_index",
+    type=int,
+    default=0,
+    help="Environment index to use when saving camera snapshots.",
+)
+parser.add_argument(
+    "--camera_snapshot_dir",
+    type=str,
+    default=None,
+    help="Optional output directory for camera snapshots (defaults to the run's log directory).",
+)
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument(
@@ -62,6 +86,8 @@ args_cli, hydra_args = parser.parse_known_args()
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
+if args_cli.camera_snapshot_interval > 0:
+    args_cli.enable_cameras = True
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -73,7 +99,6 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import gymnasium as gym
-import os
 import random
 from datetime import datetime
 
@@ -107,6 +132,120 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_pickle, dump_yaml
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
+
+import numpy as np
+
+try:
+    import imageio.v2 as imageio
+except ImportError:  # pragma: no cover - optional dependency
+    imageio = None
+
+
+class CameraSnapshotWrapper(gym.Wrapper):
+    """Gym wrapper that periodically saves RGB images from a named scene camera."""
+
+    def __init__(
+        self,
+        env: gym.Env,
+        sensor_name: str,
+        env_index: int,
+        interval: int,
+        output_dir: Path,
+    ) -> None:
+        super().__init__(env)
+        if interval <= 0:
+            raise ValueError("Snapshot interval must be positive when using CameraSnapshotWrapper.")
+        self._base_env = self.unwrapped
+        self._sensor_name = sensor_name
+        self._env_index = env_index
+        self._interval = interval
+        self._output_dir = Path(output_dir)
+        self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._step_counter = 0
+        self._warned_imageio = False
+
+        scene = getattr(self._base_env, "scene", None)
+        sensors = getattr(scene, "sensors", {}) if scene is not None else {}
+        if sensor_name not in sensors:
+            raise ValueError(
+                f"Camera sensor '{sensor_name}' is not available in the environment. "
+                "Verify that the camera resource is registered in the scene configuration."
+            )
+        self._camera = sensors[sensor_name]
+
+        # Validate environment index bounds if possible.
+        num_envs = getattr(scene, "num_envs", None)
+        if num_envs is not None and not (0 <= env_index < num_envs):
+            raise ValueError(
+                f"camera_snapshot_env_index={env_index} is out of bounds for {num_envs} environments."
+            )
+
+    def reset(self, **kwargs):  # noqa: D401 - gymnasium signature
+        results = super().reset(**kwargs)
+        self._step_counter = 0
+        self._maybe_capture(step_is_reset=True)
+        return results
+
+    def step(self, action):  # noqa: D401 - gymnasium signature
+        results = super().step(action)
+        self._step_counter += 1
+        if self._step_counter % self._interval == 0:
+            self._maybe_capture()
+        return results
+
+    def _maybe_capture(self, step_is_reset: bool = False) -> None:
+        if imageio is None:
+            if not self._warned_imageio:
+                warnings.warn(
+                    "imageio is not installed; camera snapshots will be skipped.",
+                    RuntimeWarning,
+                )
+                self._warned_imageio = True
+            return
+
+        output = self._camera.data.output
+        rgb_frame = None
+        if isinstance(output, dict):
+            rgb_frame = output.get("rgb")
+        else:
+            getter = getattr(output, "get", None)
+            if callable(getter):
+                rgb_frame = getter("rgb")
+            else:
+                rgb_frame = getattr(output, "rgb", None)
+        if rgb_frame is None:
+            raise RuntimeError(
+                f"Camera sensor '{self._sensor_name}' does not provide 'rgb' data. "
+                "Ensure that 'rgb' is present in data_types for the sensor configuration."
+            )
+
+        frame_source = rgb_frame
+        ndim = getattr(frame_source, "ndim", None)
+        if ndim == 3:
+            if self._env_index != 0:
+                raise ValueError(
+                    "Camera snapshot env index must be 0 when the sensor does not provide batched outputs."
+                )
+            frame = frame_source
+        else:
+            frame = frame_source[self._env_index]
+        if hasattr(frame, "detach"):
+            frame = frame.detach().cpu().numpy()
+        else:
+            frame = np.asarray(frame)
+
+        if frame.dtype in (np.float32, np.float64):
+            frame = np.clip(frame * 255.0, 0, 255).astype(np.uint8)
+        elif frame.dtype != np.uint8:
+            frame = frame.astype(np.uint8)
+
+        if frame.shape[-1] == 4:
+            frame = frame[..., :3]
+
+        step_tag = "reset" if step_is_reset else f"step_{self._step_counter:06d}"
+        filename = self._output_dir / f"{step_tag}.png"
+        imageio.imwrite(filename, frame)
+
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -182,8 +321,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             "IO descriptors are only supported for manager based RL environments. No IO descriptors will be exported."
         )
 
+    # determine render mode: enable RGB output when video recording or snapshots are requested
+    render_mode = "rgb_array" if args_cli.video or args_cli.camera_snapshot_interval > 0 else None
+
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode=render_mode)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
@@ -200,6 +342,22 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         print("[INFO] Recording videos during training.")
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
+
+    # optionally save camera snapshots during training
+    if args_cli.camera_snapshot_interval > 0:
+        snapshot_dir = Path(args_cli.camera_snapshot_dir) if args_cli.camera_snapshot_dir else Path(log_dir) / "snapshots"
+        print(
+            "[INFO] Saving camera snapshots to"
+            f" '{snapshot_dir}' every {args_cli.camera_snapshot_interval} environment steps (env index"
+            f" {args_cli.camera_snapshot_env_index})."
+        )
+        env = CameraSnapshotWrapper(
+            env,
+            sensor_name="camera",
+            env_index=args_cli.camera_snapshot_env_index,
+            interval=args_cli.camera_snapshot_interval,
+            output_dir=snapshot_dir,
+        )
 
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
