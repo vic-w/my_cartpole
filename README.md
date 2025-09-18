@@ -85,7 +85,7 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
 
       其中 `--camera-snapshot-interval` 控制保存频率（单位：环境步数），`--camera-output-dir` 指定图像输出目录。
 
-3. 训练日志、检查点和相机图像（若启用）都会写入 `logs/` 及 `output/` 等子目录，可根据需要进一步分析或可视化。
+3. 训练日志、检查点和相机图像（若启用）都会写入 `logs/` 及 `outputs/` 等子目录，可根据需要进一步分析或可视化。
 
 ### Set up IDE (Optional)
 
