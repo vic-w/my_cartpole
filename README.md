@@ -71,16 +71,16 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
     cd /path/to/my_cartpole
     ```
 
-2. 启动训练脚本，并指定要运行的任务名称。项目默认提供 `MyCartpole-v0` 任务，可直接运行：
+2. 启动训练脚本，并指定要运行的任务名称。项目默认提供 `Template-My-Cartpole-v0` 任务，可直接运行：
 
     ```bash
-    python scripts/skrl/train.py --task=MyCartpole-v0
+    python scripts/skrl/train.py --task=Template-My-Cartpole-v0
     ```
 
     - 如果需要保存训练过程中相机拍摄的图像，可额外添加：
 
         ```bash
-        python scripts/skrl/train.py --task=MyCartpole-v0 --camera-snapshot-interval=500 --camera-output-dir=output/camera
+        python scripts/skrl/train.py --task=Template-My-Cartpole-v0 --camera_snapshot_interval=50 --camera_snapshot_dir=outputs/camera --num_envs=1
         ```
 
       其中 `--camera-snapshot-interval` 控制保存频率（单位：环境步数），`--camera-output-dir` 指定图像输出目录。
