@@ -14,6 +14,7 @@ a more user-friendly way.
 
 import argparse
 import sys
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -21,6 +22,27 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from skrl.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument(
+    "--camera_snapshot_interval",
+    type=int,
+    default=0,
+    help=(
+        "Save a still image from the task camera every N environment steps during playback. "
+        "Disabled when set to 0."
+    ),
+)
+parser.add_argument(
+    "--camera_snapshot_env_index",
+    type=int,
+    default=0,
+    help="Environment index to use when saving camera snapshots.",
+)
+parser.add_argument(
+    "--camera_snapshot_dir",
+    type=str,
+    default=None,
+    help="Optional output directory for camera snapshots (defaults to the checkpoint log directory).",
+)
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
@@ -65,6 +87,8 @@ args_cli, hydra_args = parser.parse_known_args()
 # always enable cameras to record video
 if args_cli.video:
     args_cli.enable_cameras = True
+if args_cli.camera_snapshot_interval > 0:
+    args_cli.enable_cameras = True
 
 # clear out sys.argv for Hydra
 sys.argv = [sys.argv[0]] + hydra_args
@@ -108,6 +132,8 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.pretrained_checkpoint import get_published_pretrained_checkpoint
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
+
+from camera_utils import CameraSnapshotWrapper
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import get_checkpoint_path
@@ -166,7 +192,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
     log_dir = os.path.dirname(os.path.dirname(resume_path))
 
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    render_mode = "rgb_array" if args_cli.video or args_cli.camera_snapshot_interval > 0 else None
+
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode=render_mode)
 
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv) and algorithm in ["ppo"]:
@@ -186,9 +214,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, expe
             "video_length": args_cli.video_length,
             "disable_logger": True,
         }
-        print("[INFO] Recording videos during training.")
+        print("[INFO] Recording videos during playback.")
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
+
+    if args_cli.camera_snapshot_interval > 0:
+        snapshot_dir = (
+            Path(args_cli.camera_snapshot_dir)
+            if args_cli.camera_snapshot_dir
+            else Path(log_dir) / "snapshots" / "play"
+        )
+        print(
+            "[INFO] Saving camera snapshots to",
+            f" '{snapshot_dir}' every {args_cli.camera_snapshot_interval} environment steps (env index",
+            f" {args_cli.camera_snapshot_env_index}).",
+        )
+        env = CameraSnapshotWrapper(
+            env,
+            sensor_name="camera",
+            env_index=args_cli.camera_snapshot_env_index,
+            interval=args_cli.camera_snapshot_interval,
+            output_dir=snapshot_dir,
+        )
 
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
