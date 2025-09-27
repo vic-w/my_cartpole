@@ -18,12 +18,17 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 
 from . import mdp
+#from isaaclab.envs import mdp as mdp_obs
+
 
 ##
 # Pre-defined configs
 ##
 
-from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
+#from isaaclab_assets.robots.cartpole import CARTPOLE_CFG  # isort:skip
+from .my_robot import CARTPOLE_CFG
+from isaaclab.envs.mdp import observations as mdp_obs
+from isaaclab.sensors.camera import CameraCfg
 
 
 ##
@@ -50,6 +55,22 @@ class MyCartpoleSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.DomeLightCfg(color=(0.9, 0.9, 0.9), intensity=500.0),
     )
 
+    camera = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/front_cam",
+        update_period=0.1,
+        height=256,
+        width=256,
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=18.0, focus_distance=4.0, horizontal_aperture=32.0, clipping_range=(0.1, 1.0e5)
+        ),
+        # Place the camera so that its optical axis is perpendicular to the rail and captures both ends.
+        offset=CameraCfg.OffsetCfg(
+            pos=(4.0, 0.0, 1.5),
+            rot=(0.5, -0.5, -0.5, 0.5), 
+            convention="ros",
+        ),
+    )
 
 ##
 # MDP settings
@@ -74,6 +95,17 @@ class ObservationsCfg:
         # observation terms (order preserved)
         joint_pos_rel = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel_rel = ObsTerm(func=mdp.joint_vel_rel)
+        
+        camera_image_features = ObsTerm(
+            func=mdp_obs.image_features,
+            params={
+                "sensor_cfg": SceneEntityCfg("camera"),
+                "data_type": "rgb",        # image_features 内部会调用 image(..., normalize=False)
+                "model_name": "resnet18",  # 可选: resnet18 / resnet50 / theia...
+                # "model_zoo_cfg": {...},  # 如需离线或自定义模型，可在此提供映射字典
+                # "model_device": "cpu",   # 可选：指定模型加载设备（默认 env.device）
+            },
+        )
 
         def __post_init__(self) -> None:
             self.enable_corruption = False
